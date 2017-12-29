@@ -16,7 +16,7 @@ LIBRARY_IOC += si7021
 DBD += si7021.dbd
 
 # specify all source files to be compiled and added to the library
-#si7021_SRCS += xxx
+si7021_SRCS += drvAsynSi7021.cpp
 
 si7021_LIBS += $(EPICS_BASE_IOC_LIBS)
 
