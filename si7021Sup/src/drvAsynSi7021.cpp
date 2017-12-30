@@ -32,6 +32,8 @@ drvAsynSi7021::drvAsynSi7021(const char* portName, int i2cPortNum, int i2cAddr)
     const char* functionName = "drvAsynLSM303D";
 
     this->i2cAddr = (unsigned short)i2cAddr;
+    this->hum     = 0;
+    this->temp    = 0;
 
     createParam(P_TempCString, asynParamFloat64, &P_Temp_C);
     createParam(P_TempFString, asynParamFloat64, &P_Temp_F);
@@ -64,7 +66,7 @@ asynStatus drvAsynSi7021::connect(asynUser* pasynUser)
     if (i2c_wr(i2cAddr, (unsigned char*)"\xfe", 1) != 0) {
         return asynError;
     }
-    epicsThreadSleep(0.015);
+    epicsThreadSleep(0.1);
 
     return status;
 }
@@ -85,9 +87,8 @@ void drvAsynSi7021::pollTask(void)
 {
     epicsTimeStamp now;
     epicsUInt32 delay_ns;
+    int oneHz = 0;
     unsigned char vals[3];
-    epicsFloat64 newVal;
-    epicsFloat64 smoo = 0.983;
 
     lock();
     while (1) {
@@ -96,36 +97,32 @@ void drvAsynSi7021::pollTask(void)
         epicsTimeGetCurrent(&now);
         delay_ns = 50000000 - (now.nsec % 50000000); /* 20 Hz */
         epicsEventWaitWithTimeout(eventId_, delay_ns / 1.e9);
+        oneHz = (now.nsec >= 750000000) && (now.nsec < 800000000);
 
         lock();
 
-        /* Make RH measurement */
-        i2c_wr(i2cAddr, (unsigned char*)"\xf5", 1);
-        epicsThreadSleep(0.02);
-        i2c_rd(i2cAddr, vals, 3);
-        newVal = (vals[0] << 8) | vals[1];
-        newVal = 125 * newVal / 65536 - 6;
-        if (hum == 0) {
-            hum = newVal;
-        } else {
-            hum = (1 - smoo) * newVal + smoo * hum;
-        }
-        setDoubleParam(P_Hum, hum);
+        if (oneHz) {
+            /* Initiate a measurement */
+            i2c_wr(i2cAddr, (unsigned char*)"\xf5", 1);
 
-        /* Read the assocuated temperature measurement */
-        i2c_wr_rd(i2cAddr, (unsigned char*)"\xe0", 1, vals, 2);
-        newVal = (vals[0] << 8) | vals[1];
-        newVal = 175.72 * newVal / 65536 - 46.85;
-        if (temp == 0) {
-            temp = newVal;
-        } else {
-            temp = (1 - smoo) * newVal + smoo * hum;
-        }
-        setDoubleParam(P_Temp_C, temp);
-        setDoubleParam(P_Temp_F, temp * 9 / 5 + 32);
+            epicsThreadSleep(0.1);
 
-        updateTimeStamp();
-        callParamCallbacks();
+            /* Read RH data */
+            i2c_rd(i2cAddr, vals, 3);
+            hum = (vals[0] << 8) | vals[1];
+            hum = 125 * hum / 65536 - 6;
+            setDoubleParam(P_Hum, hum);
+
+            /* Read temperature data */
+            i2c_wr_rd(i2cAddr, (unsigned char*)"\xe0", 1, vals, 2);
+            temp = (vals[0] << 8) | vals[1];
+            temp = 175.72 * temp / 65536 - 46.85;
+            setDoubleParam(P_Temp_C, temp);
+            setDoubleParam(P_Temp_F, temp * 9 / 5 + 32);
+
+            updateTimeStamp();
+            callParamCallbacks();
+        }
     }
 }
 
